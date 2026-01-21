@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>SLAM Live Map</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+<style>
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+  }
+
+  #map {
+    width: 100%;
+    height: 100%;
+    background: #eaeaea;
+  }
+
+  .control-panel {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 1000;
+    background: white;
+    padding: 8px;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+</style>
+
+</head>
+
+<body>
+<div style="
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  background: white;
+  padding: 10px;
+  border-radius: 6px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.3);
+">
+  <button id="startBtn">🚀 Start SLAM & Mapping</button>
+  <div id="status" style="margin-top:8px;font-size:14px;"></div>
+</div>
+
+<!-- <div class="control-panel">
+  <button onclick="startSlam()">Start SLAM & Mapping</button>
+  <div id="status">Idle</div>
+</div> -->
+<button id="stopBtn">🛑 Stop Drone</button>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const statusDiv = document.getElementById("status");
+const startBtn = document.getElementById("startBtn");
+
+startBtn.onclick = async () => {
+  statusDiv.innerText = "⏳ Starting SLAM...";
+
+  try {
+    const res = await fetch("http://localhost:8000/slam/start", {
+      method: "POST"
+    });
+
+    const data = await res.json();
+
+    if (data.ok) {
+      statusDiv.innerText =
+        "✅ SLAM running\n📡 UDP listener active\n🚁 Ready to map";
+      startBtn.disabled = true;
+    } else {
+      statusDiv.innerText = "❌ Failed: " + data.msg;
+    }
+
+  } catch (e) {
+    statusDiv.innerText = "❌ Backend not reachable";
+  }
+};
+async function startSlam() {
+  document.getElementById("status").innerText = "Starting...";
+  const res = await fetch("/slam/start", { method: "POST" });
+  const data = await res.json();
+   document.getElementById("status").innerText = data.msg || "Started";
+}
+
+console.log("Initializing SLAM map...");
+document.getElementById("stopBtn").onclick = async () => {
+  await fetch("http://localhost:8000/slam/stop", {
+    method: "POST"
+  });
+  alert("Drone stopping...");
+};
+
+  // --- Create LOCAL SLAM MAP ---
+  const map = L.map("map", {
+  crs: L.CRS.Simple,
+  minZoom: -5,
+  zoomControl: true,
+});
+
+const SCALE = 20; // pixels per meter (tune)
+map.setView([0, 0], 0);
+
+// optional: draw bounds (e.g. 200m x 200m)
+const bounds = [[-200*SCALE, -200*SCALE], [200*SCALE, 200*SCALE]];
+L.rectangle(bounds, {weight:1}).addTo(map);
+map.fitBounds(bounds);
+
+  // --- Drone marker ---
+  const droneIcon = L.divIcon({
+    html: "🚁",
+    iconSize: [30, 30],
+    className: ""
+  });
+
+  let droneMarker = L.marker([0, 0], { icon: droneIcon }).addTo(map);
+
+  // --- Trajectory ---
+  let polyline = L.polyline([], { color: "red" }).addTo(map);
+
+  async function updateTrajectory() {
+  try {
+    const res = await fetch("/slam/trajectory");
+    if (!res.ok) return;
+    const traj = await res.json();
+
+    if (!traj || traj.length < 2) return;
+
+    // SLAM coords -> Leaflet Simple coords (y down)
+    // We'll use: LeafletX = x, LeafletY = -z
+    const latlngs = traj.map(p => {
+      const x = p[0];
+      const z = p[2];
+      return [-z * SCALE, x * SCALE];
+    });
+
+    polyline.setLatLngs(latlngs);
+
+    const last = latlngs[latlngs.length - 1];
+    droneMarker.setLatLng(last);
+
+    // don't pan every time (causes jitter), only if far:
+    // map.panTo(last, { animate: true, duration: 0.2 });
+  } catch (e) {
+    console.error("Trajectory error:", e);
+  }
+}
+
+setInterval(updateTrajectory, 300);
+
+
+  setInterval(updateTrajectory, 200);
+
+map.on("click", async (e) => {
+  const lat = e.latlng.lat;
+  const lng = e.latlng.lng;
+
+  // Leaflet → SLAM
+  const target = {
+    x: lng / SCALE,
+    y: 0.0,
+    z: -lat / SCALE
+  };
+
+  console.log("🧭 Target SLAM:", target);
+
+  // Visual feedback
+  L.circleMarker(e.latlng, {
+    radius: 5,
+    color: "blue"
+  }).addTo(map);
+
+  try {
+    const res = await fetch("/slam/goto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(target)
+    });
+
+    const data = await res.json();
+    console.log(data);
+
+  } catch (err) {
+    console.error("Goto error:", err);
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+%YAML:1.0$
+Camera.type: "PinHole"
+
+Camera.width: 640
+Camera.height: 480
+Camera.fx: 320.0
+Camera.fy: 320.0
+Camera.cx: 320.0
+Camera.cy: 240.0
+Camera.k1: 0.0
+Camera.k2: 0.0
+Camera.p1: 0.0
+Camera.p2: 0.0
+Camera.bFishEye: 0
+Camera.fps: 30.0
+Camera.RGB: 1
+
+# Stereo baseline × fx  →  0.20 m × 320 px/m = 64 px
+Camera.bf: 128.0
+
+ThDepth: 250.0
+
+Tlr: !!opencv-matrix
+  rows: 3
+  cols: 4
+  dt: d
+  data: [ 1, 0, 0,  0.20,
+          0, 1, 0,  0.00,
+          0, 0, 1,  0.00 ]
+
+Tbc: !!opencv-matrix
+  rows: 3
+  cols: 4
+  dt: d
+  data: [ 0, 1, 0, 0,
+          0, 0, 1, 0,
+          1, 0, 0, 0 ]
+
+
+# ORB Extractor
+ORBextractor.nFeatures: 10000
+ORBextractor.scaleFactor: 1.2
+ORBextractor.nLevels: 8
+ORBextractor.iniThFAST: 15
+ORBextractor.minThFAST: 7
+
+# Viewer
+Viewer.KeyFrameSize: 0.05
+Viewer.KeyFrameLineWidth: 1
+Viewer.GraphLineWidth: 0.9
+Viewer.PointSize: 2
+Viewer.CameraSize: 0.08
+Viewer.CameraLineWidth: 3
+Viewer.ViewpointX: 0
+Viewer.ViewpointY: -0.7
+Viewer.ViewpointZ: -1.8
+Viewer.ViewpointF: 500
+# --------------------------------------------------------------------------------------------
+# Dummy stereo rectification (AirSim already ideal pinhole)
+# --------------------------------------------------------------------------------------------
+LEFT.height: 480
+LEFT.width: 640
+LEFT.K: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [320.0, 0.0, 320.0, 0.0, 320.0, 240.0, 0.0, 0.0, 1.0]
+LEFT.D: !!opencv-matrix
+   rows: 1
+   cols: 5
+   dt: d
+   data: [0.0, 0.0, 0.0, 0.0, 0.0]
+LEFT.R: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+LEFT.P: !!opencv-matrix
+   rows: 3
+   cols: 4
+   dt: d
+   data: [320.0, 0.0, 320.0, 0.0, 0.0, 320.0, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+RIGHT.height: 480
+RIGHT.width: 640
+RIGHT.K: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [320.0, 0.0, 320.0, 0.0, 320.0, 240.0, 0.0, 0.0, 1.0]
+RIGHT.D: !!opencv-matrix
+   rows: 1
+   cols: 5
+   dt: d
+   data: [0.0, 0.0, 0.0, 0.0, 0.0]
+RIGHT.R: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+RIGHT.P: !!opencv-matrix
+   rows: 3
+   cols: 4
+   dt: d
+   data: [320.0, 0.0, 320.0, -128.0, 0.0, 320.0, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+System.SaveAtlasToFile: "/home/moussakathem/ORB_SLAM3/maps/airsim_map.osa"
+System.LoadAtlasFromFile: ""

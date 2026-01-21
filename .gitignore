@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtualenvs
+venv/
+.venv/
+*/venv/
+*/.venv/
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+
+# Env / logs
+.env
+*.log
+
+# ORB-SLAM3 artifacts
+orb_slam3/build/
+orb_slam3/**/build/
+orb_slam3/**/CMakeFiles/
+orb_slam3/**/CMakeCache.txt
+orb_slam3/**/cmake_install.cmake
+orb_slam3/**/Makefile
+orb_slam3/**/*.so
+orb_slam3/**/*Trajectory*.txt
+orb_slam3/**/*.tum
+orb_slam3/**/*.png
+orb_slam3/**/*.zip
+orb_slam3/**/airsim*_venv/
+orb_slam3/**/airsim*venv/
+
