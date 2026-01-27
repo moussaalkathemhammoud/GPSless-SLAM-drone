@@ -1,0 +1,2 @@
+# This directory stores SLAM UI database files
+# mission.db will be created automatically when FastAPI runs
