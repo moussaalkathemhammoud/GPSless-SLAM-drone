@@ -16,7 +16,7 @@ Camera.fps: 30.0
 Camera.RGB: 1
 
 # Stereo baseline × fx  →  0.20 m × 320 px/m = 64 px
-Camera.bf: 128.0
+Camera.bf: 64.0
 
 ThDepth: 250.0
 
@@ -102,4 +102,4 @@ RIGHT.P: !!opencv-matrix
    rows: 3
    cols: 4
    dt: d
-   data: [320.0, 0.0, 320.0, -128.0, 0.0, 320.0, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+   data: [320.0, 0.0, 320.0, -64.0, 0.0, 320.0, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]

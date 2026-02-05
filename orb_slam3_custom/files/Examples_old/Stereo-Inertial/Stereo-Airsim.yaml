@@ -17,7 +17,7 @@ Camera.height: 480
 
 Camera.fps: 30.0
 
-Camera.bf: 25.6
+Camera.bf: 40.0
 
 ThDepth: 40.0
 Camera.RGB: 1
@@ -45,12 +45,13 @@ IMU.GyroWalk: 0.0001
 IMU.AccWalk: 0.001
 IMU.Frequency: 200.0
 
+Camera.bf: 64.0
+
 Tlr: !!opencv-matrix
   rows: 4
   cols: 4
   dt: f
-  data: [1, 0, 0, -0.08,
+  data: [1, 0, 0, -0.125,
          0, 1, 0,  0.0,
          0, 0, 1,  0.0,
          0, 0, 0,  1]
-

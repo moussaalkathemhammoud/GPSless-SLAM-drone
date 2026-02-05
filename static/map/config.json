@@ -1,0 +1,8 @@
+{
+  "meters_per_pixel": 0.26,
+  "origin_px": { "x": 428.4, "y": 520.9 },
+  "origin_airsim_xy_m": { "x": 0, "y": 0 },
+  "image_px": { "w": 1024, "h": 1024 },
+  "locked_zoom_in_levels": 2,
+  "notes": "origin_px is the pixel coordinate (in the image) where the AirSim origin should appear. origin_airsim_xy_m is the AirSim (x,y) (meters) that should map to the fake-GPS origin. Normally keep origin_airsim_xy_m at (0,0) and only adjust origin_px + meters_per_pixel."
+}

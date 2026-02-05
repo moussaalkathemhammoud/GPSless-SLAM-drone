@@ -10,9 +10,10 @@
 #include <atomic>
 #include <csignal>
 #include <cstring>      // ✅ added (strlen)
+#include <cstdlib>      // getenv
 #include <filesystem>
 #include <cstdio>
-
+#include <fcntl.h>   // ✅ REQUIRED for fcntl, F_GETFL, O_NONBLOCK
 #include <opencv2/opencv.hpp>
 
 #include <Eigen/Core>   // ✅ added (Vector3f)
@@ -26,12 +27,35 @@ using std::cout;
 using std::cerr;
 using std::endl;
 constexpr float MAP_SCALE = 20.0f; // pixels per meter
+bool g_localization_only = false;
+
 // ---------- Global stop flag (Ctrl+C safe shutdown) ----------
 static std::atomic<bool> g_stop(false);
 static void signalHandler(int)
 {
     g_stop = true;
 }
+int createUdpRecvSocket(int port)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) { perror("cmd socket"); exit(1); }
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    if (bind(sock, (sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("cmd bind"); exit(1);
+    }
+
+    // non-blocking
+    int flags = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+
+    return sock;
+}
+
 
 // ---------- Convert AirSim image to OpenCV ----------
 static cv::Mat airsimResponseToMat(
@@ -65,6 +89,8 @@ int createUdpSocket(const std::string& ip, int port, sockaddr_in& addr)
 bool has_origin = false;
 Eigen::Vector3f origin;
 
+// Print stereo baseline once (computed from AirSim-reported camera positions in ImageResponse).
+static bool g_printed_baseline = false;
 
 int main(int argc, char** argv)
 {
@@ -104,36 +130,95 @@ int main(int argc, char** argv)
 
     cout << "Connected to AirSim" << endl;
 
-    const std::string left_cam  = "0";
-    const std::string right_cam = "1";
+    // AirSim camera selection:
+    // Prefer explicit names (stable) over numeric indices (order-dependent).
+    // You can override with env vars if your settings.json uses different names.
+    const char* left_cam_env = std::getenv("AIRSIM_LEFT_CAM");
+    const char* right_cam_env = std::getenv("AIRSIM_RIGHT_CAM");
+    std::string left_cam  = (left_cam_env && std::strlen(left_cam_env)) ? std::string(left_cam_env) : "StereoCameraLeft";
+    std::string right_cam = (right_cam_env && std::strlen(right_cam_env)) ? std::string(right_cam_env) : "StereoCameraRight";
+    bool cams_fallback_to_indices = false;
+    std::cout << "AirSim cameras (preferred): left='" << left_cam << "' right='" << right_cam << "'\n";
 
-    msr::airlib::vector<msr::airlib::ImageCaptureBase::ImageRequest> requests;
-    requests.emplace_back(
-        left_cam,
-        msr::airlib::ImageCaptureBase::ImageType::Scene,
-        false,
-        false
-    );
-    requests.emplace_back(
-        right_cam,
-        msr::airlib::ImageCaptureBase::ImageType::Scene,
-        false,
-        false
-    );
+    auto build_requests = [&](const std::string& l, const std::string& r) {
+        msr::airlib::vector<msr::airlib::ImageCaptureBase::ImageRequest> req;
+        req.emplace_back(l, msr::airlib::ImageCaptureBase::ImageType::Scene, false, false);
+        req.emplace_back(r, msr::airlib::ImageCaptureBase::ImageType::Scene, false, false);
+        return req;
+    };
+
+    auto requests = build_requests(left_cam, right_cam);
 
     auto t0 = std::chrono::steady_clock::now();
     auto last_print = t0;
     int frame_count = 0;
+    int cmd_sock = createUdpRecvSocket(6007);
+bool localization_only = false;
+auto last_dump = std::chrono::steady_clock::now();
 
     // ---------- Main SLAM loop ----------
     while (!g_stop)
     {
-        auto responses = client.simGetImages(requests, vehicle_name);
+        char cmd_buf[256];
+int n = recv(cmd_sock, cmd_buf, sizeof(cmd_buf)-1, 0);
+if (n > 0) {
+    cmd_buf[n] = '\0';
+    std::string cmd(cmd_buf);
+
+    if (cmd.find("localization") != std::string::npos) {
+        localization_only = true;
+        SLAM.ActivateLocalizationMode();
+        std::cout << "🔒 SLAM localization-only\n";
+    } 
+    else if (cmd.find("mapping") != std::string::npos) {
+        localization_only = false;
+        SLAM.DeactivateLocalizationMode();
+        std::cout << "🗺️ SLAM mapping mode\n";
+    }
+}
+
+        msr::airlib::vector<msr::airlib::ImageCaptureBase::ImageResponse> responses;
+        try {
+            responses = client.simGetImages(requests, vehicle_name);
+        } catch (const std::exception& e) {
+            // Common cause: invalid camera name (AirSim settings.json doesn't contain it).
+            // Fall back to numeric indices once to preserve old behavior.
+            if (!cams_fallback_to_indices) {
+                cams_fallback_to_indices = true;
+                left_cam = "0";
+                right_cam = "1";
+                requests = build_requests(left_cam, right_cam);
+                std::cerr << "AirSim simGetImages failed for named cameras; falling back to indices left='0' right='1'. Error: " << e.what() << "\n";
+            } else {
+                std::cerr << "AirSim simGetImages failed (still). Error: " << e.what() << "\n";
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(80));
+            continue;
+        }
 
         if (responses.size() < 2)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
             continue;
+        }
+
+        if (!g_printed_baseline) {
+            try {
+                const auto& p0 = responses[0].camera_position;
+                const auto& p1 = responses[1].camera_position;
+                // AirSim client in this build exposes camera_position as an Eigen vector.
+                const double dx = double(p1.x()) - double(p0.x());
+                const double dy = double(p1.y()) - double(p0.y());
+                const double dz = double(p1.z()) - double(p0.z());
+                const double b = std::sqrt(dx * dx + dy * dy + dz * dz);
+                std::cout
+                    << "AirSim stereo baseline (from ImageResponse camera_position): "
+                    << b << " m"
+                    << " (dx=" << dx << ", dy=" << dy << ", dz=" << dz << ")\n";
+                g_printed_baseline = true;
+            } catch (...) {
+                // ignore
+            }
         }
 
         cv::Mat left  = airsimResponseToMat(responses[0]);
@@ -171,14 +256,21 @@ int main(int argc, char** argv)
     float map_y = z * MAP_SCALE;
 
 
-    Eigen::Matrix3f R = Twc.rotationMatrix();
-    float yaw = atan2(R(1,0), R(0,0));
+	    Eigen::Matrix3f R = Twc.rotationMatrix();
+	    float yaw = atan2(R(1,0), R(0,0));
 
-    char buffer[128];
-    snprintf(buffer, sizeof(buffer),
-         "%.3f %.3f %.3f %.3f %.1f %.1f",
-         x, y, z, yaw,
-         map_x, map_y);
+	    char buffer[128];
+	    // IMPORTANT:
+	    // Send an epoch timestamp for time-aligning SLAM poses with AirSim poses.
+	    // Format expected by slam_web UDP listener:
+	    //   sx sy sz yaw slam_ts [optional extras...]
+	    // slam_ts is seconds since epoch (double), comparable to Python time.time().
+	    double slam_ts = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+	    snprintf(buffer, sizeof(buffer),
+	         "%.3f %.3f %.3f %.3f %.6f %.1f %.1f",
+	         x, y, z, yaw,
+	         slam_ts,
+	         map_x, map_y);
 
 
     sendto(
@@ -189,7 +281,6 @@ int main(int argc, char** argv)
         (sockaddr*)&udp_addr,
         sizeof(udp_addr)
     );
-static auto last_dump = std::chrono::steady_clock::now();
 auto now_dump = std::chrono::steady_clock::now();
 
 // dump every 1 second (tune 200ms–1000ms)
