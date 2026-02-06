@@ -208,6 +208,19 @@ def goto_target(x: float, y: float, z: float, velocity: float = 1.2) -> None:
             target_z = float(z)
             if target_z > SAFE_MIN_ALTITUDE:
                 target_z = SAFE_MIN_ALTITUDE
+            # Post-move refinement makes click-to-go land much closer to the requested point.
+            # AirSim can stop with a small residual error depending on velocity/physics.
+            try:
+                tol_m = float(os.getenv("GOTO_TOL_M", "0.6"))
+            except Exception:
+                tol_m = 0.6
+            tol_m = max(0.1, min(tol_m, 5.0))
+            try:
+                max_refine = int(os.getenv("GOTO_REFINE_ITERS", "3"))
+            except Exception:
+                max_refine = 3
+            max_refine = max(0, min(max_refine, 10))
+            refine_speed = max(0.2, min(0.6, float(velocity)))
             # Face travel direction (yaw) for better stability.
             try:
                 cx, cy = _get_position_xy(c)
@@ -219,6 +232,7 @@ def goto_target(x: float, y: float, z: float, velocity: float = 1.2) -> None:
                     c.rotateToYawAsync(float(yaw_deg), margin=2.0).join()
             except Exception:
                 pass
+            # First approach
             with rpc_lock:
                 c.moveToPositionAsync(
                     float(x),
@@ -228,6 +242,32 @@ def goto_target(x: float, y: float, z: float, velocity: float = 1.2) -> None:
                     drivetrain=airsim.DrivetrainType.ForwardOnly,
                     yaw_mode=airsim.YawMode(False, float(yaw_deg)),
                 ).join()
+
+            # Refine: re-issue small corrections at a lower speed until within tolerance.
+            for _ in range(max_refine):
+                try:
+                    cx, cy = _get_position_xy(c)
+                    dist = float(((float(x) - cx) ** 2 + (float(y) - cy) ** 2) ** 0.5)
+                except Exception:
+                    break
+                if dist <= tol_m:
+                    break
+                try:
+                    yaw_deg = _norm_deg(math.degrees(math.atan2(float(y) - cy, float(x) - cx)))
+                except Exception:
+                    yaw_deg = 0.0
+                try:
+                    with rpc_lock:
+                        c.moveToPositionAsync(
+                            float(x),
+                            float(y),
+                            float(target_z),
+                            velocity=float(refine_speed),
+                            drivetrain=airsim.DrivetrainType.ForwardOnly,
+                            yaw_mode=airsim.YawMode(False, float(yaw_deg)),
+                        ).join()
+                except Exception:
+                    break
             stop_and_hover(c)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -619,6 +659,10 @@ def _command_server() -> None:
                 # If the caller provides an id, only abort that mission.
                 if (not mid) or (mission_active_id is None) or (mid == mission_active_id):
                     mission_abort_evt.set()
+                    try:
+                        cancel_motion()
+                    except Exception:
+                        pass
 
             elif t == "calib_stop":
                 calib_abort_evt.set()

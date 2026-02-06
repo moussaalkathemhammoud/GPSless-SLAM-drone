@@ -96,6 +96,16 @@ _latest_mission_id: str | None = None
 _latest_mission_file: Path | None = None
 
 
+class MissionLastResp(BaseModel):
+    ok: bool
+    mission_id: str | None = None
+    mission_area: list[LatLng] | None = None
+    origin: LatLng | None = None
+    yaw_deg: float | None = None
+    offset_x_m: float | None = None
+    offset_y_m: float | None = None
+
+
 def _grid_spacing_m() -> float:
     # Configurable, but kept server-side for determinism and simple UI.
     import os
@@ -144,6 +154,87 @@ def _write_mission_file(payload: dict[str, Any]) -> Path:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to write mission file: {e}")
     return path
+
+
+def _is_mission_id(s: str) -> bool:
+    # Mission ids are uuid4 hex (32 chars).
+    if len(s) != 32:
+        return False
+    try:
+        int(s, 16)
+        return True
+    except Exception:
+        return False
+
+
+def _find_latest_mission_file() -> Path | None:
+    _ensure_missions_dir()
+    candidates: list[Path] = []
+    for p in MISSIONS_DIR.glob("*.json"):
+        name = p.stem
+        if not _is_mission_id(name):
+            continue
+        if name == "slam_airsim_pairs" or name == "airsim_pose" or name == "slam_to_airsim_transform":
+            continue
+        candidates.append(p)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
+@router.get("/last", response_model=MissionLastResp)
+def mission_last() -> MissionLastResp:
+    """
+    Returns the most recently created mission polygon (lat/lng) plus the current
+    geo origin/yaw/offset used for conversions.
+
+    This is a UI helper so the frontend can rebuild overlays after refresh/restart.
+    """
+    global _latest_mission_id, _latest_mission_file
+
+    mission_file = _latest_mission_file
+    if not mission_file or not mission_file.exists():
+        mission_file = _find_latest_mission_file()
+
+    if not mission_file or not mission_file.exists():
+        return MissionLastResp(ok=True, mission_id=None, mission_area=None)
+
+    try:
+        payload = json.loads(mission_file.read_text())
+    except Exception:
+        return MissionLastResp(ok=True, mission_id=None, mission_area=None)
+
+    mission_id = str(payload.get("mission_id") or mission_file.stem)
+    raw_area = payload.get("mission_area")
+    if not isinstance(raw_area, list) or len(raw_area) < 3:
+        return MissionLastResp(ok=True, mission_id=mission_id, mission_area=None)
+
+    area: list[LatLng] = []
+    for p in raw_area:
+        if not isinstance(p, dict):
+            continue
+        try:
+            area.append(LatLng(lat=float(p["lat"]), lng=float(p["lng"])))
+        except Exception:
+            continue
+
+    origin = get_fake_gps_origin()
+    yaw_deg = get_fake_gps_yaw_deg()
+    offset_xy = get_fake_gps_offset_xy_m()
+
+    _latest_mission_id = mission_id
+    _latest_mission_file = mission_file
+
+    return MissionLastResp(
+        ok=True,
+        mission_id=mission_id,
+        mission_area=area if len(area) >= 3 else None,
+        origin=LatLng(lat=origin.lat0, lng=origin.lng0),
+        yaw_deg=float(yaw_deg),
+        offset_x_m=float(offset_xy[0]),
+        offset_y_m=float(offset_xy[1]),
+    )
 
 
 @router.post("/create", response_model=MissionCreateResp)
@@ -301,6 +392,11 @@ def mission_goto(req: MissionGotoReq):
     start_drone()
     if get_slam_state() == "calibrating":
         raise HTTPException(status_code=409, detail="Calibration is running. Wait for it to finish.")
+    # Ensure a running mission doesn't keep overriding the operator's manual goto.
+    try:
+        send_mission_abort(mission_id="")
+    except Exception:
+        pass
     send_slam_mode("localization")
     set_slam_state("localization")
     send_drone_mode("explore")

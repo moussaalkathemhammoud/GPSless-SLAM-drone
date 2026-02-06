@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 
 from .slam_process import start_slam, stop_slam
@@ -11,6 +12,12 @@ from .drone_process import stop_drone
 from .static_geo_init import init_static_origin_at_spawn
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(slam_router)
 app.include_router(mission_router)
 
